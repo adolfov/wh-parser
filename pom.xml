@@ -5,4 +5,8 @@
   <version>0.0.1-SNAPSHOT</version>
   <name>WalletHub Parser</name>
   <description>Coding Test Adolfo Vazquez</description>
+
+  <build>
+    <finalName>${project.artifactId}</finalName>
+  </build>
 </project>
