@@ -1,13 +1,9 @@
 package com.ef;
 
 import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
-import java.io.Reader;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 
@@ -18,8 +14,6 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -27,40 +21,20 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 
-import com.ef.model.BlockedIp;
-import com.ef.model.LogEntry;
 import com.ef.repository.BlockedIpRepository;
 import com.ef.repository.LogEntryRepository;
 
 @SpringBootApplication
 public class Parser {
 
-  private static final String ACCESS_LOG = "accesslog";
-  private static final String START_DATE = "startDate";
-  private static final String DURATION = "duration";
-  private static final String THRESHOLD = "threshold";
-  private static final String DURATION_HOURLY = "hourly";
-  private static final String DURATION_DAILY = "daily";
-  private static final String LOG_DATE_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS";
-  private static final String CL_DATE_FORMAT = "yyyy-MM-dd.HH:mm:ss";
-  private static final char DELIMITER = '|';
-
-  private LogEntryRepository leRepository;
-  private BlockedIpRepository biRepository;
-
   private static final Logger log = LoggerFactory.getLogger(Parser.class);
-
-  public Parser(LogEntryRepository leRepository, BlockedIpRepository biRepository) {
-    this.leRepository = leRepository;
-    this.biRepository = biRepository;
-  }
 
   public static void main(String[] args) {
     SpringApplication.run(Parser.class, args);
   }
 
   @Bean
-  public CommandLineRunner run(LogEntryRepository leRepository, BlockedIpRepository bIpRepository) throws Exception {
+  public CommandLineRunner run(LogEntryRepository leRepository, BlockedIpRepository biRepository) throws Exception {
     return (args) -> {
       Options options = generateCLOptions();
 
@@ -74,24 +48,18 @@ public class Parser {
         return;
       }
 
-      String accessLogFileName = commandLine.getOptionValue(ACCESS_LOG);
-      String startDateString = commandLine.getOptionValue(START_DATE);
-      String duration = commandLine.getOptionValue(DURATION);
-      int threshold = Integer.valueOf(commandLine.getOptionValue(THRESHOLD));
-      DateFormat format = new SimpleDateFormat(CL_DATE_FORMAT);
+      String accessLogFileName = commandLine.getOptionValue(Constants.ACCESS_LOG);
+      String startDateString = commandLine.getOptionValue(Constants.START_DATE);
+      String duration = commandLine.getOptionValue(Constants.DURATION);
+      int threshold = Integer.valueOf(commandLine.getOptionValue(Constants.THRESHOLD));
+      DateFormat format = new SimpleDateFormat(Constants.CL_DATE_FORMAT);
       Date startDate = format.parse(startDateString);
-      Parser parser = new Parser(leRepository, biRepository);
+      ParserService parserService = new ParserService(leRepository, biRepository);
       try {
-        parser.loadFileToDb(accessLogFileName);
-        List<String> logEntries = parser.findMatches(startDate, duration, threshold);
+        parserService.loadFileToDb(accessLogFileName);
+        List<String> logEntries = parserService.findMatches(startDate, duration, threshold);
         log.debug("Found " + logEntries.size() + " matches");
-        logEntries.forEach(logEntry -> {
-          log.debug(logEntry);
-          BlockedIp blockedIp = new BlockedIp();
-          blockedIp.setIp(logEntry);
-          blockedIp.setComments(String.format("Threshold exceeded. Start date=%s, Duration=%s, Threshold=%d", startDateString, duration, threshold));
-          parser.storeBlockedIp(blockedIp);
-        });
+        parserService.storeEntries(startDateString, duration, threshold, logEntries);
       } catch (FileNotFoundException e) {
         e.printStackTrace();
       } catch (IOException e) {
@@ -100,68 +68,15 @@ public class Parser {
     };
   }
 
-  public List<String> findMatches(Date startDate, String duration, int threshold) {
-    log.debug("Finding matches for startDate: " + startDate + ", duration: " + duration + ", threshold: " + threshold);
-    List<String> logEntries = new ArrayList<String>();
-    Date endDate = null;
-    Calendar calendar = Calendar.getInstance();
-    calendar.setTime(startDate);
-
-    if (duration.equalsIgnoreCase(DURATION_HOURLY)) {
-      calendar.add(Calendar.HOUR_OF_DAY, 1);
-    } else if (duration.equalsIgnoreCase(DURATION_DAILY)) {
-      calendar.add(Calendar.DATE, 1);
-    }
-    endDate = calendar.getTime();
-    log.debug("Finding matches between startDate: " + startDate + ", endDate: " + endDate);
-    logEntries = this.leRepository.findByDateBetween(startDate, endDate, threshold);
-
-    return logEntries;
-  }
-
-  public void loadFileToDb(String fileName) throws IOException {
-    log.debug("Started loading file: " + fileName);
-    Reader reader = new FileReader(fileName);
-    CSVFormat format = CSVFormat.DEFAULT.withDelimiter(DELIMITER);
-    Iterable<CSVRecord> records = format.parse(reader);
-    for (CSVRecord record : records) {
-      LogEntry logEntry = parseLogEntry(record);
-      storeLogEntry(logEntry);
-    }
-    log.debug("Finished loading file: " + fileName);
-  }
-
-  private void storeLogEntry(LogEntry logEntry) {
-    this.leRepository.save(logEntry);
-  }
-
-  private void storeBlockedIp(BlockedIp blockedIp) {
-    this.biRepository.save(blockedIp);
-  }
-
-  private LogEntry parseLogEntry(CSVRecord record) {
-    LogEntry logEntry = new LogEntry(parseDate(record.get(0)), record.get(1), record.get(2), Integer.valueOf(record.get(3)), record.get(4));
-    return logEntry;
-  }
-
-  private Date parseDate(String dateString) {
-    Date date = null;
-    SimpleDateFormat sdf = new SimpleDateFormat(LOG_DATE_FORMAT);
-    try {
-      date = sdf.parse(dateString);
-    } catch (Exception e) {
-      // swallow it
-    }
-    return date;
-  }
-
   private static Options generateCLOptions() {
-    final Option accesslogOption = Option.builder().required().hasArg().longOpt(ACCESS_LOG).desc("/path/to/file")
+    final Option accesslogOption = Option.builder().required().hasArg().longOpt(Constants.ACCESS_LOG)
+        .desc("/path/to/file").build();
+    final Option startDateOption = Option.builder().required().hasArg().longOpt(Constants.START_DATE)
+        .desc("2017-01-01.13:00:00").build();
+    final Option durationOption = Option.builder().required().hasArg().longOpt(Constants.DURATION).desc("hourly")
         .build();
-    final Option startDateOption = Option.builder().required().hasArg().longOpt(START_DATE).desc("2017-01-01.13:00:00")
+    final Option thresholdOption = Option.builder().required().hasArg().longOpt(Constants.THRESHOLD).desc("100")
         .build();
-    final Option durationOption = Option.builder().required().hasArg().longOpt(DURATION).desc("hourly").build();
-    final Option thresholdOption = Option.builder().required().hasArg().longOpt(THRESHOLD).desc("100").build();
 
     final Options options = new Options();
     options.addOption(accesslogOption);
