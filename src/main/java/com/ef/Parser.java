@@ -4,8 +4,12 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
+import java.text.DateFormat;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
+import java.util.List;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -30,7 +34,10 @@ public class Parser {
   private static final String START_DATE = "startDate";
   private static final String DURATION = "duration";
   private static final String THRESHOLD = "threshold";
-  private static final String DATE_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS";
+  private static final String DURATION_HOURLY = "hourly";
+  private static final String DURATION_DAILY = "daily";
+  private static final String LOG_DATE_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS";
+  private static final String CL_DATE_FORMAT = "yyyy-MM-dd.HH:mm:ss";
   private static final char DELIMITER = '|';
 
   private LogEntryRepository leRepository;
@@ -61,9 +68,17 @@ public class Parser {
       }
 
       String accessLogFileName = commandLine.getOptionValue(ACCESS_LOG);
+      String startDateString = commandLine.getOptionValue(START_DATE);
+      String duration = commandLine.getOptionValue(DURATION);
+      int threshold = Integer.valueOf(commandLine.getOptionValue(THRESHOLD));
+      DateFormat format = new SimpleDateFormat(CL_DATE_FORMAT);
+      Date startDate = format.parse(startDateString);
       Parser parser = new Parser(repository);
       try {
         parser.loadFileToDb(accessLogFileName);
+        List<String> logEntries = parser.findMatches(startDate, duration, threshold);
+        log.debug("Found " + logEntries.size() + " matches");
+        logEntries.forEach(logEntry -> log.debug(logEntry));
       } catch (FileNotFoundException e) {
         e.printStackTrace();
       } catch (IOException e) {
@@ -72,8 +87,27 @@ public class Parser {
     };
   }
 
+  public List<String> findMatches(Date startDate, String duration, int threshold) {
+    log.debug("Finding matches for startDate: " + startDate + ", duration: " + duration + ", threshold: " + threshold);
+    List<String> logEntries = new ArrayList<String>();
+    Date endDate = null;
+    Calendar calendar = Calendar.getInstance();
+    calendar.setTime(startDate);
+    
+    if (duration.equalsIgnoreCase(DURATION_HOURLY)) {
+      calendar.add(Calendar.HOUR_OF_DAY, 1);
+    } else if (duration.equalsIgnoreCase(DURATION_DAILY)) {
+      calendar.add(Calendar.DATE, 1);
+    }
+    endDate = calendar.getTime();
+    log.debug("Finding matches between startDate: " + startDate + ", endDate: " + endDate);
+    logEntries = this.leRepository.findByDateBetween(startDate, endDate, threshold);
+
+    return logEntries;
+  }
+
   public void loadFileToDb(String fileName) throws IOException {
-	log.debug("Started loading file: " + fileName);
+	  log.debug("Started loading file: " + fileName);
     Reader reader = new FileReader(fileName);
     CSVFormat format = CSVFormat.DEFAULT.withDelimiter(DELIMITER);
     Iterable<CSVRecord> records = format.parse(reader);
@@ -100,7 +134,7 @@ public class Parser {
 
   private Date parseDate(String dateString) {
     Date date = null;
-    SimpleDateFormat sdf = new SimpleDateFormat(DATE_FORMAT);
+    SimpleDateFormat sdf = new SimpleDateFormat(LOG_DATE_FORMAT);
     try {
       date = sdf.parse(dateString);
     } catch (Exception e) {
