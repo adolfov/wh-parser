@@ -41,11 +41,13 @@ public class Parser {
   private static final char DELIMITER = '|';
 
   private LogEntryRepository leRepository;
+  private BlockedIpRepository biRepository;
 
   private static final Logger log = LoggerFactory.getLogger(Parser.class);
 
-   public Parser(LogEntryRepository repository) {
-     this.leRepository = repository;
+  public Parser(LogEntryRepository leRepository, BlockedIpRepository biRepository) {
+    this.leRepository = leRepository;
+    this.biRepository = biRepository;
   }
 
   public static void main(String[] args) {
@@ -53,7 +55,7 @@ public class Parser {
   }
 
   @Bean
-  public CommandLineRunner run(LogEntryRepository repository) throws Exception {
+  public CommandLineRunner run(LogEntryRepository leRepository, BlockedIpRepository bIpRepository) throws Exception {
     return (args) -> {
       Options options = generateCLOptions();
 
@@ -73,12 +75,18 @@ public class Parser {
       int threshold = Integer.valueOf(commandLine.getOptionValue(THRESHOLD));
       DateFormat format = new SimpleDateFormat(CL_DATE_FORMAT);
       Date startDate = format.parse(startDateString);
-      Parser parser = new Parser(repository);
+      Parser parser = new Parser(leRepository, biRepository);
       try {
         parser.loadFileToDb(accessLogFileName);
         List<String> logEntries = parser.findMatches(startDate, duration, threshold);
         log.debug("Found " + logEntries.size() + " matches");
-        logEntries.forEach(logEntry -> log.debug(logEntry));
+        logEntries.forEach(logEntry -> {
+          log.debug(logEntry);
+          BlockedIp blockedIp = new BlockedIp();
+          blockedIp.ip = logEntry;
+          blockedIp.comments = String.format("Threshold exceeded. Start date=%s, Duration=%s, Threshold=%d", startDateString, duration, threshold);
+          parser.storeBlockedIp(blockedIp);
+        });
       } catch (FileNotFoundException e) {
         e.printStackTrace();
       } catch (IOException e) {
@@ -93,7 +101,7 @@ public class Parser {
     Date endDate = null;
     Calendar calendar = Calendar.getInstance();
     calendar.setTime(startDate);
-    
+
     if (duration.equalsIgnoreCase(DURATION_HOURLY)) {
       calendar.add(Calendar.HOUR_OF_DAY, 1);
     } else if (duration.equalsIgnoreCase(DURATION_DAILY)) {
@@ -107,7 +115,7 @@ public class Parser {
   }
 
   public void loadFileToDb(String fileName) throws IOException {
-	  log.debug("Started loading file: " + fileName);
+    log.debug("Started loading file: " + fileName);
     Reader reader = new FileReader(fileName);
     CSVFormat format = CSVFormat.DEFAULT.withDelimiter(DELIMITER);
     Iterable<CSVRecord> records = format.parse(reader);
@@ -120,6 +128,10 @@ public class Parser {
 
   private void storeLogEntry(LogEntry logEntry) {
     this.leRepository.save(logEntry);
+  }
+
+  private void storeBlockedIp(BlockedIp blockedIp) {
+    this.biRepository.save(blockedIp);
   }
 
   private LogEntry parseLogEntry(CSVRecord record) {
