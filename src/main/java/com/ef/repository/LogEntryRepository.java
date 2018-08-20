@@ -1,10 +1,12 @@
-package com.ef;
+package com.ef.repository;
 
 import java.util.Date;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.CrudRepository;
+
+import com.ef.model.LogEntry;
 
 public interface LogEntryRepository extends CrudRepository<LogEntry, Integer> {
 

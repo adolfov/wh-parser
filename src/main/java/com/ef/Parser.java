@@ -27,6 +27,11 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 
+import com.ef.model.BlockedIp;
+import com.ef.model.LogEntry;
+import com.ef.repository.BlockedIpRepository;
+import com.ef.repository.LogEntryRepository;
+
 @SpringBootApplication
 public class Parser {
 
@@ -83,8 +88,8 @@ public class Parser {
         logEntries.forEach(logEntry -> {
           log.debug(logEntry);
           BlockedIp blockedIp = new BlockedIp();
-          blockedIp.ip = logEntry;
-          blockedIp.comments = String.format("Threshold exceeded. Start date=%s, Duration=%s, Threshold=%d", startDateString, duration, threshold);
+          blockedIp.setIp(logEntry);
+          blockedIp.setComments(String.format("Threshold exceeded. Start date=%s, Duration=%s, Threshold=%d", startDateString, duration, threshold));
           parser.storeBlockedIp(blockedIp);
         });
       } catch (FileNotFoundException e) {
@@ -135,12 +140,7 @@ public class Parser {
   }
 
   private LogEntry parseLogEntry(CSVRecord record) {
-    LogEntry logEntry = new LogEntry();
-    logEntry.date = parseDate(record.get(0));
-    logEntry.ip = record.get(1);
-    logEntry.request = record.get(2);
-    logEntry.status = Integer.valueOf(record.get(3));
-    logEntry.userAgent = record.get(4);
+    LogEntry logEntry = new LogEntry(parseDate(record.get(0)), record.get(1), record.get(2), Integer.valueOf(record.get(3)), record.get(4));
     return logEntry;
   }
 
