@@ -46,30 +46,39 @@ public class Parser {
         HelpFormatter formatter = new HelpFormatter();
         formatter.printHelp("Parser", options);
         return;
-      }
+      }      
 
       String accessLogFileName = commandLine.getOptionValue(Constants.ACCESS_LOG);
       String startDateString = commandLine.getOptionValue(Constants.START_DATE);
       String duration = commandLine.getOptionValue(Constants.DURATION);
-      int threshold = Integer.valueOf(commandLine.getOptionValue(Constants.THRESHOLD));
+      String thresholdString = commandLine.getOptionValue(Constants.THRESHOLD);
+      
+      validateParams(startDateString, duration, thresholdString);
+
+      int threshold = Integer.valueOf(thresholdString);
       DateFormat format = new SimpleDateFormat(Constants.CL_DATE_FORMAT);
       Date startDate = format.parse(startDateString);
+      
       ParserService parserService = new ParserService(leRepository, biRepository);
       try {
-        parserService.loadFileToDb(accessLogFileName);
+        if (accessLogFileName != null && !accessLogFileName.isEmpty()) {
+          parserService.loadFileToDb(accessLogFileName);
+        }
         List<String> logEntries = parserService.findMatches(startDate, duration, threshold);
         log.debug("Found " + logEntries.size() + " matches");
         parserService.storeEntries(startDateString, duration, threshold, logEntries);
       } catch (FileNotFoundException e) {
-        e.printStackTrace();
+        log.error("Exception with file: " + accessLogFileName, e);
+        throw e;
       } catch (IOException e) {
-        e.printStackTrace();
+        log.error("Exception with file: " + accessLogFileName, e);
+        throw e;
       }
     };
   }
 
   private static Options generateCLOptions() {
-    final Option accesslogOption = Option.builder().required().hasArg().longOpt(Constants.ACCESS_LOG)
+    final Option accesslogOption = Option.builder().required(false).hasArg().longOpt(Constants.ACCESS_LOG)
         .desc("/path/to/file").build();
     final Option startDateOption = Option.builder().required().hasArg().longOpt(Constants.START_DATE)
         .desc("2017-01-01.13:00:00").build();
@@ -84,6 +93,17 @@ public class Parser {
     options.addOption(durationOption);
     options.addOption(thresholdOption);
     return options;
+  }
+
+  private static void validateParams(String startDate, String duration, String threshold) throws Exception {
+    DateFormat format = new SimpleDateFormat(Constants.CL_DATE_FORMAT);
+    format.parse(startDate);
+
+    if (!duration.equalsIgnoreCase(Constants.DURATION_DAILY) && !duration.equalsIgnoreCase(Constants.DURATION_HOURLY)) {
+    	throw new Exception("Invalid duration, valid durations are 'hourly' or 'daily', provided duration is: " + duration);
+    }
+    
+    Integer.valueOf(threshold);
   }
 
 }

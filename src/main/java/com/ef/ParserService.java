@@ -1,5 +1,6 @@
 package com.ef;
 
+import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
@@ -8,19 +9,21 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.StreamSupport;
 
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import com.ef.model.BlockedIp;
 import com.ef.model.LogEntry;
 import com.ef.repository.BlockedIpRepository;
 import com.ef.repository.LogEntryRepository;
 
-@Service
+@Component
 public class ParserService {
 
 	private LogEntryRepository leRepository;
@@ -31,6 +34,21 @@ public class ParserService {
 	public ParserService(LogEntryRepository leRepository, BlockedIpRepository biRepository) {
 		this.leRepository = leRepository;
 		this.biRepository = biRepository;
+	}
+
+	public void loadFileToDb(String fileName) throws FileNotFoundException, IOException {
+		log.debug("Started loading file: " + fileName);
+		Reader reader = new FileReader(fileName);
+		CSVFormat format = CSVFormat.DEFAULT.withDelimiter(Constants.DELIMITER);
+		Iterable<CSVRecord> records = format.parse(reader);
+		final AtomicInteger loader = new AtomicInteger();
+
+		StreamSupport.stream(records.spliterator(), false).peek(record -> {
+			if (loader.incrementAndGet() % 5000 == 0) {
+				log.debug("Records processed so far: " + loader.get() + "...");
+			}
+		}).forEach(record -> storeLogEntry(parseLogEntry(record)));
+		log.debug("Finished loading file: " + fileName);
 	}
 
 	public List<String> findMatches(Date startDate, String duration, int threshold) {
@@ -52,16 +70,15 @@ public class ParserService {
 		return logEntries;
 	}
 
-	public void loadFileToDb(String fileName) throws IOException {
-		log.debug("Started loading file: " + fileName);
-		Reader reader = new FileReader(fileName);
-		CSVFormat format = CSVFormat.DEFAULT.withDelimiter(Constants.DELIMITER);
-		Iterable<CSVRecord> records = format.parse(reader);
-		for (CSVRecord record : records) {
-			LogEntry logEntry = parseLogEntry(record);
-			storeLogEntry(logEntry);
-		}
-		log.debug("Finished loading file: " + fileName);
+	public void storeEntries(String startDate, String duration, int threshold, List<String> logEntries) {
+		logEntries.forEach(ip -> {
+			log.debug(ip);
+			BlockedIp blockedIp = new BlockedIp();
+			blockedIp.setIp(ip);
+			blockedIp.setComments(String.format("Threshold exceeded. Start date=%s, Duration=%s, Threshold=%d", startDate,
+					duration, threshold));
+			storeBlockedIp(blockedIp);
+		});
 	}
 
 	private void storeLogEntry(LogEntry logEntry) {
@@ -84,20 +101,9 @@ public class ParserService {
 		try {
 			date = sdf.parse(dateString);
 		} catch (Exception e) {
-			// swallow it
+			log.warn("Unable to parse date: " + dateString);
 		}
 		return date;
-	}
-
-	public void storeEntries(String startDate, String duration, int threshold, List<String> logEntries) {
-		logEntries.forEach(logEntry -> {
-			log.debug(logEntry);
-			BlockedIp blockedIp = new BlockedIp();
-			blockedIp.setIp(logEntry);
-			blockedIp.setComments(String.format("Threshold exceeded. Start date=%s, Duration=%s, Threshold=%d", startDate,
-					duration, threshold));
-			storeBlockedIp(blockedIp);
-		});
 	}
 
 }
